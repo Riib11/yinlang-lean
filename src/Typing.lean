@@ -47,7 +47,7 @@ def Knd.infer (Γ : Ctx) : Typ -> TypingM Knd
     return Knd.arr κ μ
   | Typ.arr .. => return Knd.unt
 
-def Knd.check (Γ : Ctx) (α : Typ) (κ : Knd) : TypingM Unit := do
+def Knd.chk (Γ : Ctx) (α : Typ) (κ : Knd) : TypingM Unit := do
   let κ' <- Knd.infer Γ α
   κ ~~ κ'
 
@@ -132,13 +132,28 @@ def Typ.infer (Γ : Ctx) : Trm -> TypingM Typ
     β ~ β'
     Typ.infer (Ctx.consTyp x β Γ) a
 
-def Typ.check (Γ : Ctx) (t : Trm) (α : Typ) : TypingM Unit := do
+def Typ.chk (Γ : Ctx) (t : Trm) (α : Typ) : TypingM Unit := do
   let α' <- Typ.infer Γ t
   α ~ α'
   return default
-
 
 -- #eval 
 --   Typ.infer 
 --     (Ctx.consTyp (Name.mk "x") (Typ.bas BasTyp.unt) Ctx.nil)
 --     (Trm.var (Name.mk "x")) 
+
+-- ## Checking Declarations
+
+def Dec.chk (Γ : Ctx) : Dec -> TypingM Unit
+  | Dec.trm _x α a => Typ.chk Γ a α
+  | _ => throw "unimpl"
+
+-- ## Checking Program
+
+def Prg.chk (Γ : Ctx) : Prg -> TypingM Unit
+  | [] => return default
+  | (d :: ds) => do
+    void $ Dec.chk Γ d
+    match d with 
+    | Dec.trm x α _a => Prg.chk (Ctx.consTyp x α Γ) ds
+    | _ => throw "unimpl"

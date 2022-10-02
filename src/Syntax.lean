@@ -1,6 +1,6 @@
--- Syntax
+-- # Syntax
 
--- Name
+-- ## Name
 
 structure Name where
   label : String
@@ -9,7 +9,7 @@ deriving BEq, Repr
 instance : ToString Name where 
   toString name := name.label
 
--- Knd: Kind
+-- ## Knd: Kind
 
 inductive Knd where
   | unt : Knd
@@ -19,7 +19,7 @@ deriving BEq, Repr
 instance : ToString Knd where
   toString := toString ∘ repr
 
--- Typ: Type
+-- ## Typ: Type
 
 inductive BasTyp where
   | unt : BasTyp
@@ -35,7 +35,7 @@ deriving BEq, Repr
 instance : ToString Typ where
   toString := toString ∘ repr
 
--- Trm: Term
+-- ## Trm: Term
 
 inductive BasTrm where
   | unt : BasTrm
@@ -54,7 +54,7 @@ deriving BEq, Repr
 instance : ToString Trm where
   toString := toString ∘ repr
 
--- Dec: Declaration
+-- ## Dec: Declaration
 
 -- constructor
 inductive Con where
@@ -75,3 +75,7 @@ deriving BEq, Repr
 
 instance : ToString Dec where
   toString := toString ∘ repr
+
+-- ## Prg
+
+abbrev Prg := List Dec
