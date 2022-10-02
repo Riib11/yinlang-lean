@@ -1,57 +1,109 @@
--- Typing
+-- # Typing
 
 import Syntax
 
--- Ctx
+-- ## TypingM
+
+abbrev TypingM α := Except String α
+
+def assert : Bool -> String -> TypingM Unit
+  | true => fun _ => return default
+  | false => throw
+
+def void (m : TypingM α) : TypingM Unit := do
+  let _ <- m
+  return default
+
+-- ## Ctx
 
 structure Ctx where 
-  knds : Name -> Option Knd
-  typs : Name -> Option Typ
+  knds : Name -> TypingM Knd
+  typs : Name -> TypingM Typ
 
 def Ctx.nil : Ctx where 
-  knds := fun _ => none
-  typs := fun _ => none
+  knds := fun x => throw s!"The type var {x} isn't in context."
+  typs := fun x => throw s!"The term var {x} isn't in context."
 
 def Ctx.consKnd (x : Name) (κ : Knd) (Γ : Ctx) : Ctx where
-  knds := fun y => if x == y then κ else Γ.knds y
+  knds := fun y => if x == y then return κ else Γ.knds y
   typs := Γ.typs
 
 def Ctx.consTyp (x : Name) (α : Typ) (Γ : Ctx) : Ctx where
   knds := Γ.knds
-  typs := fun y => if x == y then α else Γ.typs y
+  typs := fun y => if x == y then return α else Γ.typs y
 
--- Kinding
+-- ## Kinding
 
-def Knd.infer (Γ : Ctx) (α : Typ) : Option Knd :=
-  match α with 
-  | Typ.bas basTyp => 
-    match basTyp with 
-    | BasTyp.unt => Knd.unt
+def Knd.uni : Knd -> Knd -> TypingM Unit
+  | κ, κ' => assert (κ == κ') s!"The kinds {κ} and {κ'} don't unify."
+
+notation κ " ~~ " κ' => void (Knd.uni κ κ')
+
+def Knd.infer (Γ : Ctx) : Typ -> TypingM Knd
+  | Typ.bas BasTyp.unt => return Knd.unt
   | Typ.var x => Γ.knds x
   | Typ.all x κ β => do
     let μ <- Knd.infer (Ctx.consKnd x κ Γ) β
     return Knd.arr κ μ
-  | Typ.arr .. => Knd.unt
+  | Typ.arr .. => return Knd.unt
 
-def Knd.check (Γ : Ctx) (α : Typ) (κ : Knd) : Bool :=
-  match Knd.infer Γ α with 
-  | some κ' => κ == κ' 
-  | none => false
+def Knd.check (Γ : Ctx) (α : Typ) (κ : Knd) : TypingM Unit := do
+  let κ' <- Knd.infer Γ α
+  κ ~~ κ'
 
--- Typing
+-- ## Typing
 
-def Typ.sub (x : Name) (ξ : Typ) (α : Typ) : Typ :=
-  match α with 
-  | Typ.bas .. => α
-  | Typ.var y => if x == y then ξ else α
+-- type variable substitution in a type
+def Typ.sub (x : Name) (ξ : Typ) : Typ -> Typ
+  | Typ.bas α => Typ.bas α
+  | Typ.var y => 
+    if x == y 
+      then ξ 
+      else Typ.var y
   | Typ.arr β γ => Typ.arr (Typ.sub x ξ β) (Typ.sub x ξ γ)
-  | Typ.all y κ β => if x == y then α else Typ.all y κ (Typ.sub x ξ β)   
+  | Typ.all y κ β => 
+    if x == y 
+      then Typ.all y κ β
+      else Typ.all y κ (Typ.sub x ξ β)
 
-def Typ.infer (Γ : Ctx) (t : Trm) : Option Typ :=
-  match t with 
-  | Trm.bas t' => 
-    match t' with 
-    | BasTrm.unt => Typ.bas BasTyp.unt
+def Typ.subTrm (x : Name) (ξ : Typ) : Trm -> Trm
+  | Trm.bas t => Trm.bas t
+  | Trm.var y => Trm.var y
+  | Trm.lam y α b => Trm.lam y (Typ.sub x ξ α) (Typ.subTrm x ξ b)
+  | Trm.all y κ b =>
+    if x == y
+      then Trm.all y κ b
+      else Trm.all y κ (Typ.subTrm x ξ b)
+  | Trm.app f a => Trm.app (Typ.subTrm x ξ f) (Typ.subTrm x ξ a)
+  | Trm.ins f α => Trm.ins (Typ.subTrm x ξ f) (Typ.sub x ξ α)
+  | Trm.loc y α a b => Trm.loc y (Typ.sub x ξ α) (Typ.subTrm x ξ a) (Typ.subTrm x ξ b)  
+
+-- type-equality up to alpha-renaming
+def Typ.uni : Typ -> Typ -> TypingM Typ
+  | Typ.bas α, Typ.bas α' => do
+    assert (α == α') s!"The types {Typ.bas α} and {Typ.bas α'} don't unify."
+    return Typ.bas α
+  | Typ.var x , Typ.var x' => do
+    assert (x == x') s!"The types {Typ.var x} and {Typ.var x'} don't unify."
+    return Typ.var x
+  | Typ.arr β γ , Typ.arr β' γ' => do
+    let β'' <- Typ.uni β β'
+    let γ'' <- Typ.uni γ γ'
+    return Typ.arr β'' γ''
+  | Typ.all x κ β , Typ.all x' κ' β' => do
+    assert (κ == κ') s!"The types {Typ.all x κ β} and {Typ.all x' κ' β'} don't unify."
+    let β'' <- 
+      (if x == x' 
+        then Typ.uni β β'
+        else Typ.uni β (Typ.sub x' (Typ.var x) β'))
+    return Typ.all x κ β''
+  | α , α' => throw s!"The types {α} and {α'} don't unify." 
+
+notation α " ~ " α' => void (Typ.uni α α')
+
+-- type inference
+def Typ.infer (Γ : Ctx) : Trm -> TypingM Typ
+  | Trm.bas BasTrm.unt => return Typ.bas BasTyp.unt
   | Trm.var x => Γ.typs x
   | Trm.lam x α b => do
     let β <- Typ.infer (Ctx.consTyp x α Γ) b
@@ -64,26 +116,27 @@ def Typ.infer (Γ : Ctx) (t : Trm) : Option Typ :=
     match φ with 
     | Typ.arr α β => do
       let α' <- Typ.infer Γ a
-      guard $ α == α'
+      α ~ α'
       return β
-    | _ => none
+    | _ => throw s!"The applicant {f} has the non-function type {φ}."
   | Trm.ins f α => do
     let φ <- Typ.infer Γ f
     match φ with
     | Typ.all x κ β => do
       let κ' <- Knd.infer Γ α
-      guard $ κ == κ'
+      κ ~~ κ'
       return Typ.sub x α β
-    | _ => none
+    | _ => throw s!"The type-applicant {f} has the non-polymorphic type {φ}"
   | Trm.loc x β b a => do
     let β' <- Typ.infer Γ b 
-    guard (β == β')
+    β ~ β'
     Typ.infer (Ctx.consTyp x β Γ) a
 
-def Typ.check (Γ : Ctx) (t : Trm) (α : Typ) : Bool :=
-  match Typ.infer Γ t with 
-  | some α' => α == α'
-  | none => false
+def Typ.check (Γ : Ctx) (t : Trm) (α : Typ) : TypingM Unit := do
+  let α' <- Typ.infer Γ t
+  α ~ α'
+  return default
+
 
 -- #eval 
 --   Typ.infer 
